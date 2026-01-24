@@ -1,0 +1,29 @@
+# Dependency folders
+node_modules/
+jspm_packages/
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Environment variables (가장 중요: 봇 토큰 및 비밀 정보 포함)
+.env
+config.json
+
+# Build output (컴파일된 파일이 있을 경우)
+dist/
+build/
+
+# IDE files
+.vscode/
+.idea/
+
+*.zip
+*base.js
+*player-script.js
+discordconfig.js

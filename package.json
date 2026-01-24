@@ -1,0 +1,22 @@
+{
+  "name": "wdiscordbot",
+  "version": "1.0.0",
+  "main": "discordbot.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@discordjs/opus": "^0.10.0",
+    "@discordjs/voice": "^0.18.0",
+    "@distube/ytdl-core": "^4.16.9",
+    "discord.js": "^14.15.3",
+    "fluent-ffmpeg": "^2.1.3",
+    "libsodium-wrappers": "^0.7.13",
+    "youtube-search": "^1.1.2",
+    "ytdl-core": "^4.11.5"
+  },
+  "description": ""
+}
