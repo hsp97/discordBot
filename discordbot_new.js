@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 // discordbot.js
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, entersState, VoiceConnectionStatus, StreamType } = require('@discordjs/voice');
@@ -5,11 +7,15 @@ const { spawn } = require('child_process');
 const search = require('youtube-search'); // 유튜브 검색 추가
 // const sodium = require('libsodium-wrappers'); // @discordjs/voice v0.8.0 이상에서는 libsodium-wrappers/sodium 대신 sodium-native 또는 tweetnacl 권장
 
-const { token, youtubeApiKey, ffmpegPath: configFfmpegPath, ytDlpPath: configYtDlpPath } = require('./discordConfig.js'); // 설정 파일에서 경로 가져오기
+//const { token, youtubeApiKey, ffmpegPath: configFfmpegPath, ytDlpPath: configYtDlpPath } = require('./discordConfig.js'); // 설정 파일에서 경로 가져오기
+const token = process.env.DISCORD_TOKEN;
+const youtubeApiKey = process.env.YOUTUBE_API_KEY;
+const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+const ytDlpPath = process.env.YT_DLP_PATH || 'yt-dlp';
 
 // 경로 설정: 설정 파일 > 환경 변수 > 기본값 순으로 우선순위
-const ytDlpPath = process.env.YT_DLP_PATH || configYtDlpPath || 'yt-dlp'; // 시스템 PATH에 yt-dlp가 설정되어 있다면 'yt-dlp'로 사용 가능
-const ffmpegPath = process.env.FFMPEG_PATH || configFfmpegPath || 'ffmpeg'; // 시스템 PATH에 ffmpeg가 설정되어 있다면 'ffmpeg'로 사용 가능
+//const ytDlpPath = process.env.YT_DLP_PATH || configYtDlpPath || 'yt-dlp'; // 시스템 PATH에 yt-dlp가 설정되어 있다면 'yt-dlp'로 사용 가능
+//const ffmpegPath = process.env.FFMPEG_PATH || configFfmpegPath || 'ffmpeg'; // 시스템 PATH에 ffmpeg가 설정되어 있다면 'ffmpeg'로 사용 가능
 
 const client = new Client({
     intents: [
@@ -256,7 +262,6 @@ client.on('interactionCreate', async interaction => {
          queue.messageChannel = interaction.channel; // 항상 최신 채널로 업데이트
     }
 
-
     const { customId } = interaction;
 
     if (customId === 'skip') {
@@ -295,6 +300,11 @@ client.on('interactionCreate', async interaction => {
 });
 
 
+/**
+ * 노래 재생
+ * @param {*} guildId 접속서버 고유ID
+ * @returns 
+ */
 async function playNext(guildId) {
     const queue = guildQueues.get(guildId);
     if (!queue) return;
@@ -448,6 +458,11 @@ async function playNext(guildId) {
     }
 }
 
+/**
+ * 서버 연결
+ * @param {*} guildId 
+ * @returns 
+ */
 function setupConnectionEventHandlers(guildId) {
     const queue = guildQueues.get(guildId);
     if (!queue || !queue.connection) return;
@@ -480,6 +495,11 @@ function setupConnectionEventHandlers(guildId) {
     });
 }
 
+/**
+ * 오디오 플레이어 세팅
+ * @param {*} guildId 
+ * @returns 
+ */
 function setupPlayerEventHandlers(guildId) {
     const queue = guildQueues.get(guildId);
     if (!queue || !queue.player) return;
@@ -526,6 +546,11 @@ function setupPlayerEventHandlers(guildId) {
     });
 }
 
+/**
+ * 현재 오디오 종료 및 제거
+ * @param {*} guildId 
+ * @returns 
+ */
 async function cleanupCurrentStreamAndProcesses(guildId) {
     const queue = guildQueues.get(guildId);
     if (!queue) return;
@@ -542,7 +567,6 @@ async function cleanupCurrentStreamAndProcesses(guildId) {
         }
         if (proc.stdin && !proc.stdin.destroyed) {
             proc.stdin.end(); // 정상 종료 유도
-            // proc.stdin.destroy(); // 강제 종료
         }
         if (proc.stderr && !proc.stderr.destroyed) {
             proc.stderr.destroy();
@@ -551,7 +575,7 @@ async function cleanupCurrentStreamAndProcesses(guildId) {
             try {
                 // SIGTERM으로 먼저 시도, 안되면 SIGKILL
                 proc.kill('SIGTERM');
-                await new Promise(resolve => setTimeout(resolve, 50)); // 잠깐 대기
+                await new Promise(resolve => setTimeout(resolve, 200)); // 잠깐 대기
                 if (!proc.killed) {
                     proc.kill('SIGKILL');
                     console.log(`[DEBUG][${guildId}] Process (PID: ${proc.pid}) SIGKILL로 종료`);
@@ -574,6 +598,15 @@ async function cleanupCurrentStreamAndProcesses(guildId) {
     console.log(`[DEBUG][${guildId}] 스트림 및 프로세스 정리 완료`);
 }
 
+/**
+ * gui 생성 및 갱신
+ * @param {*} guildId 
+ * @param {*} titleOverride 곡 제목
+ * @param {*} descOverride 곡 설명
+ * @param {*} thumbOverride 썸네일
+ * @param {*} footerOverride 하단 공통 gui
+ * @returns 
+ */
 async function sendOrUpdateEmbed(guildId, titleOverride = null, descOverride = null, thumbOverride = null, footerOverride = null) {
     const queue = guildQueues.get(guildId);
     if (!queue || !queue.messageChannel) return; // 메시지 채널 없으면 전송 불가
@@ -620,6 +653,11 @@ async function sendOrUpdateEmbed(guildId, titleOverride = null, descOverride = n
     }
 }
 
+/**
+ * 채널 나가기
+ * @param {*} guildId 
+ * @returns 
+ */
 async function leaveChannel(guildId) {
     const queue = guildQueues.get(guildId);
     if (!queue) return;
@@ -655,6 +693,11 @@ async function leaveChannel(guildId) {
     console.log(`[DEBUG][${guildId}] 채널 나가기 및 큐 정리 완료`);
 }
 
+/**
+ * 큐 삭제, 내부 초기화
+ * @param {*} guildId 
+ * @param {*} deleteQueue 
+ */
 function cleanupGuildQueue(guildId, deleteQueue = false) {
     if (deleteQueue) {
         guildQueues.delete(guildId);
