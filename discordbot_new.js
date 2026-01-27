@@ -7,15 +7,15 @@ const { spawn } = require('child_process');
 const search = require('youtube-search'); // 유튜브 검색 추가
 // const sodium = require('libsodium-wrappers'); // @discordjs/voice v0.8.0 이상에서는 libsodium-wrappers/sodium 대신 sodium-native 또는 tweetnacl 권장
 
-//const { token, youtubeApiKey, ffmpegPath: configFfmpegPath, ytDlpPath: configYtDlpPath } = require('./discordConfig.js'); // 설정 파일에서 경로 가져오기
+// const { token, youtubeApiKey, ffmpegPath: configFfmpegPath, ytDlpPath: configYtDlpPath } = require('./discordConfig.js'); // 설정 파일에서 경로 가져오기
 const token = process.env.DISCORD_TOKEN;
 const youtubeApiKey = process.env.YOUTUBE_API_KEY;
 const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
 const ytDlpPath = process.env.YT_DLP_PATH || 'yt-dlp';
 
 // 경로 설정: 설정 파일 > 환경 변수 > 기본값 순으로 우선순위
-//const ytDlpPath = process.env.YT_DLP_PATH || configYtDlpPath || 'yt-dlp'; // 시스템 PATH에 yt-dlp가 설정되어 있다면 'yt-dlp'로 사용 가능
-//const ffmpegPath = process.env.FFMPEG_PATH || configFfmpegPath || 'ffmpeg'; // 시스템 PATH에 ffmpeg가 설정되어 있다면 'ffmpeg'로 사용 가능
+// const ytDlpPath = process.env.YT_DLP_PATH || configYtDlpPath || 'yt-dlp'; // 시스템 PATH에 yt-dlp가 설정되어 있다면 'yt-dlp'로 사용 가능
+// const ffmpegPath = process.env.FFMPEG_PATH || configFfmpegPath || 'ffmpeg'; // 시스템 PATH에 ffmpeg가 설정되어 있다면 'ffmpeg'로 사용 가능
 
 const client = new Client({
     intents: [
@@ -365,6 +365,8 @@ async function playNext(guildId) {
         // yt-dlp 프로세스 생성
         queue.currentYtDlpProcess = spawn(ytDlpPath, [
             '-f', 'bestaudio[ext=opus]/bestaudio/best', // Opus 우선, 없으면 최상위 오디오
+            '--cookies', './cookies.txt', // 추출한 쿠키 파일 경로
+            '-4',                         // IPv4 강제 (AWS 차단 우회)
             '--no-playlist',
             song.url,
             '-o', '-'
