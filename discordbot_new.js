@@ -365,6 +365,7 @@ async function playNext(guildId) {
         // yt-dlp 프로세스 생성
         queue.currentYtDlpProcess = spawn(ytDlpPath, [
             '-f', 'bestaudio[ext=opus]/bestaudio/best', // Opus 우선, 없으면 최상위 오디오
+            '--cookies', './cookies.txt', // 추출한 쿠키 파일 경로
             '--no-playlist',
             song.url,
             '-o', '-'
