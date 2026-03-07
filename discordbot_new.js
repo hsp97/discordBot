@@ -376,9 +376,9 @@ async function playNext(guildId) {
 
         // yt-dlp 프로세스 생성
         queue.currentYtDlpProcess = spawn(ytDlpPath, [
-            // '--extractor-args', 'youtube:player_client=android',  // JS Challenge 우회
-            '-f', 'bestaudio/best',  // 포맷 단순화
+            '-f', 'bestaudio[ext=opus]/bestaudio/best', // Opus 우선, 없으면 최상위 오디오
             '--cookies', './cookies.txt', // 추출한 쿠키 파일 경로
+            '--js-runtimes', 'qjs', // 추가: 자바스크립트 엔진 명시
             '--no-playlist',
             '--no-progress',
             '--quiet',
