@@ -374,58 +374,65 @@ async function playNext(guildId) {
 
         console.log(`[DEBUG][${guildId}] 스트리밍 준비 시작...`);
 
-        // ===== yt-dlp 프로세스 생성 =====
+        // yt-dlp 프로세스 생성
         queue.currentYtDlpProcess = spawn(ytDlpPath, [
-            '-f', 'bestaudio[ext=opus]/bestaudio/best',
+            '-f', 'bestaudio[ext=opus]/bestaudio/best', // Opus 우선, 없으면 최상위 오디오
+            '--cookies', './cookies.txt', // 추출한 쿠키 파일 경로
+            '--js-runtimes', 'qjs', // 추가: 자바스크립트 엔진 명시
+            '-4',                         // IPv4 강제 (AWS 차단 우회)
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '--no-check-certificates', // 인증서 에러 방지 추가
             '--no-playlist',
-            '--no-progress',
             song.url,
             '-o', '-'
         ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
-        // ===== ffmpeg 프로세스 생성 =====
+        // ffmpeg 프로세스 생성
         queue.currentFfmpegProcess = spawn(ffmpegPath, [
             '-i', 'pipe:0',
             '-analyzeduration', '0',
-            '-loglevel', 'error',
-            '-f', 'opus',
+            '-loglevel', 'error', // 또는 'warning'
+            '-f', 'opus',     // Opus 직접 출력 (@discordjs/opus 필요)
+            // '-f', 's16le', // PCM 사용 시 (StreamType.Raw)
             '-ar', '48000',
             '-ac', '2',
-            '-b:a', '96k',
+            '-b:a', '96k',  // Opus 사용 시 비트레이트 (선택적)
             'pipe:1'
         ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
-        // ===== 오류 로깅 =====
-        queue.currentYtDlpProcess.stderr.on('data', (data) => {
-            const msg = data.toString().trim();
-            if (msg.includes('ERROR') || msg.includes('WARNING')) {
-                console.error(`[YT-DLP][${guildId}]: ${msg}`);
-            }
-        });
-        
-        queue.currentFfmpegProcess.stderr.on('data', (data) => {
-            const msg = data.toString().trim();
-            if (msg && !msg.includes('size=') && !msg.includes('time=')) {
-                console.error(`[FFMPEG][${guildId}]: ${msg}`);
-            }
-        });
+        // 오류 로깅
+        queue.currentYtDlpProcess.stderr.on('data', (data) => console.error(`[YT-DLP STDERR][${guildId}][${song.title}]: ${data.toString().trim()}`));
+        queue.currentFfmpegProcess.stderr.on('data', (data) => console.error(`[FFMPEG STDERR][${guildId}][${song.title}]: ${data.toString().trim()}`));
 
-        // ===== 파이핑 =====
+        // 파이핑
         queue.currentYtDlpProcess.stdout.pipe(queue.currentFfmpegProcess.stdin);
 
-        // ===== 스트림 오류 처리 =====
-        let isCleaningUp = false;
-        const handleStreamError = async (source, err) => {
-            console.error(`[${source} ERROR][${guildId}]:`, err.message);
-            if (!isCleaningUp) {
-                isCleaningUp = true;
-                await cleanupCurrentStreamAndProcesses(guildId);
-            }
-        };
+        // 스트림 오류 처리
+        queue.currentYtDlpProcess.stdout.on('error', (err) => {
+            console.error(`[YT-DLP STDOUT ERROR][${guildId}][${song.title}]:`, err.message);
+            cleanupCurrentStreamAndProcesses(guildId); // 오류 시 정리
+        });
+        queue.currentFfmpegProcess.stdin.on('error', (err) => {
+            console.error(`[FFMPEG STDIN ERROR][${guildId}][${song.title}]:`, err.message); // EOF 오류 가능 지점
+             // 이 오류 발생 시 이미 스트림이 닫힌 후 쓰려고 한 것이므로, 추가적인 write 방지 및 정리
+            cleanupCurrentStreamAndProcesses(guildId);
+        });
+         queue.currentFfmpegProcess.stdout.on('error', (err) => {
+            console.error(`[FFMPEG STDOUT ERROR][${guildId}][${song.title}]:`, err.message);
+            cleanupCurrentStreamAndProcesses(guildId);
+        });
 
-        queue.currentYtDlpProcess.stdout.on('error', (err) => handleStreamError('YT-DLP STDOUT', err));
-        queue.currentFfmpegProcess.stdin.on('error', (err) => handleStreamError('FFMPEG STDIN', err));
-        queue.currentFfmpegProcess.stdout.on('error', (err) => handleStreamError('FFMPEG STDOUT', err));
+
+        // 프로세스 종료 이벤트 핸들러
+        queue.currentYtDlpProcess.on('exit', (code, signal) => console.log(`[DEBUG][${guildId}] YT-DLP exited with code ${code}, signal ${signal} for ${song.title}`));
+        queue.currentFfmpegProcess.on('exit', (code, signal) => {
+            console.log(`[DEBUG][${guildId}] FFMPEG exited with code ${code}, signal ${signal} for ${song.title}`);
+            // FFMPEG가 예기치 않게 종료되면 Idle 이벤트가 발생 안 할 수 있으므로, 여기서도 player.stop() 고려
+            // if (queue.player && queue.player.state.status !== AudioPlayerStatus.Idle && queue.player.state.status !== AudioPlayerStatus.Buffering) {
+            //     console.log(`[DEBUG][${guildId}] FFMPEG 예기치 않은 종료, player.stop() 시도`);
+            //     queue.player.stop(true);
+            // }
+        });
 
         // ===== AudioResource 생성 =====
         queue.currentAudioResource = createAudioResource(queue.currentFfmpegProcess.stdout, {
