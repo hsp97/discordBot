@@ -389,14 +389,22 @@ async function playNext(guildId) {
 
         // ffmpeg 프로세스 생성
         queue.currentFfmpegProcess = spawn(ffmpegPath, [
+            // '-i', 'pipe:0',
+            // '-analyzeduration', '0',
+            // '-loglevel', 'error', // 또는 'warning'
+            // '-f', 'opus',     // Opus 직접 출력 (@discordjs/opus 필요)
+            // // '-f', 's16le', // PCM 사용 시 (StreamType.Raw)
+            // '-ar', '48000',
+            // '-ac', '2',
+            // '-b:a', '96k',  // Opus 사용 시 비트레이트 (선택적)
+            // 'pipe:1',
+
             '-i', 'pipe:0',
             '-analyzeduration', '0',
-            '-loglevel', 'error', // 또는 'warning'
-            '-f', 'opus',     // Opus 직접 출력 (@discordjs/opus 필요)
-            // '-f', 's16le', // PCM 사용 시 (StreamType.Raw)
+            '-loglevel', 'error',
+            '-f', 's16le',      // opus 대신 s16le(PCM) 사용
             '-ar', '48000',
             '-ac', '2',
-            '-b:a', '96k',  // Opus 사용 시 비트레이트 (선택적)
             'pipe:1'
         ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
