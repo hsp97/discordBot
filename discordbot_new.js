@@ -2,7 +2,7 @@ require('dotenv').config();
 
 // discordbot.js
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, entersState, VoiceConnectionStatus, StreamType } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, StreamType } = require('@discordjs/voice');
 const { spawn } = require('child_process');
 const search = require('youtube-search'); // 유튜브 검색 추가
 // const sodium = require('libsodium-wrappers'); // @discordjs/voice v0.8.0 이상에서는 libsodium-wrappers/sodium 대신 sodium-native 또는 tweetnacl 권장
@@ -125,6 +125,13 @@ client.on('messageCreate', async message => {
             };
             queue.playList.push(song);
             message.reply(`"${song.title}"이(가) 재생 목록에 추가되었습니다.`);
+
+            if (!queue.isPlaying) {
+                await playNext(message.guild.id);
+            } else if (queue.embedMessage && (queue.playList.length % 5 === 0 || queue.playList.length === 1)) {
+                 // await sendOrUpdateEmbed(message.guild.id);
+            }
+            
         } else {
             // Youtube 사용
             search(query, youtubeSearchOptions, async (err, results) => {
@@ -152,12 +159,6 @@ client.on('messageCreate', async message => {
                     // await sendOrUpdateEmbed(message.guild.id);
                 }
             });
-        }
-
-        if (!queue.isPlaying) {
-            await playNext(message.guild.id);
-        } else if (queue.embedMessage && (queue.playList.length % 5 === 0 || queue.playList.length === 1)) {
-             // await sendOrUpdateEmbed(message.guild.id);
         }
 
     } else if (command === '넘기기') {
@@ -308,14 +309,6 @@ async function playNext(guildId) {
     const queue = guildQueues.get(guildId);
     if (!queue) return;
 
-    // 이전 곡 완료 시 index 증가 추가
-    if (queue.isPlaying && queue.playList.length > 0) {
-        queue.currentIndex++;
-        if (queue.currentIndex >= queue.playList.length && queue.isRepeating) {
-            queue.currentIndex = 0;
-        }
-    }
-
     if (queue.playList.length === 0) {
         queue.isPlaying = false;
         await sendOrUpdateEmbed(guildId, '재생중인 노래가 없습니다', '', '', `Music Bot (반복재생 ${queue.isRepeating ? 'on' : 'off'})`);
@@ -352,13 +345,13 @@ async function playNext(guildId) {
                 return;
             }
             
-            // 권한 체크 추가
-            const permissions = queue.voiceChannel.permissionsFor(client.user);
-            console.log(`[DEBUG][${guildId}] 봇 권한:`, {
-                connect: permissions.has(PermissionFlagsBits.Connect),  
-                speak: permissions.has(PermissionFlagsBits.Speak),      
-                viewChannel: permissions.has(PermissionFlagsBits.ViewChannel) 
-            });
+            // 권한 체크 
+            // const permissions = queue.voiceChannel.permissionsFor(client.user);
+            // console.log(`[DEBUG][${guildId}] 봇 권한:`, {
+            //     connect: permissions.has(PermissionFlagsBits.Connect),  
+            //     speak: permissions.has(PermissionFlagsBits.Speak),      
+            //     viewChannel: permissions.has(PermissionFlagsBits.ViewChannel) 
+            // });
             
             console.log(`[DEBUG][${guildId}] 음성 채널 연결 시도 - Channel: ${queue.voiceChannel.name} (${queue.voiceChannel.id})`);
             
@@ -372,57 +365,12 @@ async function playNext(guildId) {
             
             setupConnectionEventHandlers(guildId);
             
-            // 상태 변화 모니터링
-            const stateLogger = (oldState, newState) => {
-                console.log(`[DEBUG][${guildId}] 🔄 Connection 상태 변화: ${oldState.status} → ${newState.status}`);
-            };
-            queue.connection.on('stateChange', stateLogger);
+            // 상태 변화 모니터링 빼버림 (잘 돌아가다가 갑자기 문제 발생 -> discord js 버전 변경 이후 문제 발생)
             
-            // Ready 대기 (더 긴 타임아웃 + 상세 로그)
-            try {
-                console.log(`[DEBUG][${guildId}] Ready 상태 대기 시작... (최대 30초)`);
-                await entersState(queue.connection, VoiceConnectionStatus.Ready, 30_000);
-                console.log(`[DEBUG][${guildId}] ✅ Ready 상태 도달 성공`);
-                queue.connection.off('stateChange', stateLogger);
-            } catch (error) {
-                console.error(`[DEBUG][${guildId}] ❌ Ready 상태 도달 실패`);
-                console.error(`[DEBUG][${guildId}] 최종 상태: ${queue.connection.state.status}`);
-                console.error(`[DEBUG][${guildId}] 에러 상세:`, error);
-                queue.connection.off('stateChange', stateLogger);
-                
-                queue.isPlaying = false;
-                if (queue.messageChannel) {
-                    queue.messageChannel.send(
-                        `음성 채널 연결에 실패했습니다.\n` +
-                        `현재 상태: ${queue.connection.state.status}\n` +
-                        `봇의 음성 채널 권한을 확인해주세요.`
-                    ).catch(console.error);
-                }
-                
-                if (queue.connection) queue.connection.destroy();
-                return;
-            }
+            // Ready 대기 빼버림 (잘 돌아가다가 갑자기 문제 발생 -> discord js 버전 변경 이후 문제 발생)
+            console.log(`[DEBUG][${guildId}] 스트리밍 시작`);
             
-        } else if ([VoiceConnectionStatus.Signalling, VoiceConnectionStatus.Connecting].includes(queue.connection.state.status)) {
-            console.log(`[DEBUG][${guildId}] 기존 연결이 진행 중. 현재 상태: ${queue.connection.state.status}`);
-            
-            try {
-                console.log(`[DEBUG][${guildId}] Ready 상태 대기 시작... (최대 20초)`);
-                await entersState(queue.connection, VoiceConnectionStatus.Ready, 20_000);
-                console.log(`[DEBUG][${guildId}] ✅ Ready 상태 도달 성공`);
-            } catch (error) {
-                console.error(`[DEBUG][${guildId}] ❌ Ready 상태 도달 실패 (재연결 대기 중)`);
-                console.error(`[DEBUG][${guildId}] 최종 상태: ${queue.connection.state.status}`);
-                
-                queue.isPlaying = false;
-                if (queue.messageChannel) {
-                    queue.messageChannel.send('음성 채널 연결 대기 중 타임아웃이 발생했습니다.').catch(console.error);
-                }
-                
-                if (queue.connection) queue.connection.destroy();
-                return;
-            }
-        }
+        } 
 
         console.log(`[DEBUG][${guildId}] 스트리밍 준비 시작...`);
 
@@ -525,19 +473,12 @@ function setupConnectionEventHandlers(guildId) {
     });
     
     queue.connection.on(VoiceConnectionStatus.Disconnected, async () => {
-        console.warn(`[DEBUG][${guildId}] 음성 연결 끊어짐. 재연결 시도...`);
-        try {
-            await Promise.race([
-                entersState(queue.connection, VoiceConnectionStatus.Signalling, 5_000),
-                entersState(queue.connection, VoiceConnectionStatus.Connecting, 5_000),
-            ]);
-        } catch (error) {
-            console.error(`[DEBUG][${guildId}] 음성 연결 재연결 실패. 채널 나감.`, error);
-            if (queue.connection.state.status !== VoiceConnectionStatus.Destroyed) {
-                // leaveChannel(guildId); // 여기서 바로 나가면 재시도 로직과 충돌 가능성
-                queue.connection.destroy(); // 명시적으로 연결 파괴
+        console.warn(`[DEBUG][${guildId}] 연결 끊어짐`);
+        setTimeout(() => {
+            if (queue.connection && queue.connection.state.status !== VoiceConnectionStatus.Destroyed) {
+                queue.connection.destroy();
             }
-        }
+        }, 5000);
     });
 
     queue.connection.on(VoiceConnectionStatus.Destroyed, () => {
@@ -562,6 +503,10 @@ function setupPlayerEventHandlers(guildId) {
         await cleanupCurrentStreamAndProcesses(guildId); // 현재 스트림/프로세스 정리 *중요*
 
         if (queue.currentIndex < queue.playList.length -1 || queue.isRepeating) {
+            queue.currentIndex++;
+            if (queue.currentIndex >= queue.playList.length && queue.isRepeating) {
+                queue.currentIndex = 0;
+            }
             await playNext(guildId);
         } else {
             queue.currentIndex++;
