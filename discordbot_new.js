@@ -444,7 +444,7 @@ async function playNext(guildId) {
 
         // ===== AudioResource 생성 =====
         queue.currentAudioResource = createAudioResource(queue.currentFfmpegProcess.stdout, {
-            inputType: StreamType.OggOpus,
+            inputType: StreamType.Raw,
             inlineVolume: true
         });
 
