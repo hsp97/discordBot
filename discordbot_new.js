@@ -316,11 +316,11 @@ async function playNext(guildId) {
         queue.isPlaying = false;
         await sendOrUpdateEmbed(guildId, '재생중인 노래가 없습니다', '', '', `Music Bot (반복재생 ${queue.isRepeating ? 'on' : 'off'})`);
         // 큐가 비었을 때 자동으로 나갈지 여부 (선택적)
-        // setTimeout(() => { // 약간의 지연 후 퇴장
-        //     if (queue && queue.playList.length === 0 && !queue.isPlaying && queue.connection) {
-        //         leaveChannel(guildId);
-        //     }
-        // }, 300000); // 예: 5분 후
+        setTimeout(() => { // 약간의 지연 후 퇴장
+            if (queue && queue.playList.length === 0 && !queue.isPlaying && queue.connection) {
+                leaveChannel(guildId);
+            }
+        }, 1200000); // 20분 후
         return;
     }
 
@@ -354,12 +354,36 @@ async function playNext(guildId) {
                 adapterCreator: client.guilds.cache.get(guildId).voiceAdapterCreator,
             });
             setupConnectionEventHandlers(guildId); // 연결 이벤트 핸들러 설정
-            await entersState(queue.connection, VoiceConnectionStatus.Ready, 30_000);
-            console.log(`[DEBUG][${guildId}] ✅ 음성 채널 연결 준비 완료`);
+            try {
+                await entersState(queue.connection, VoiceConnectionStatus.Ready, 20_000);
+                console.log(`[DEBUG][${guildId}] ✅ 음성 채널 연결 준비 완료`);
+            } catch (error){
+                console.error(`[DEBUG][${guildId}] ❌ 음성 채널 연결 타임아웃:`, error.message);
+                queue.isPlaying = false;
+                if (queue.messageChannel) {
+                    queue.messageChannel.send('음성 채널 연결에 실패했습니다. 네트워크 상태를 확인하거나 다시 시도해주세요.').catch(console.error);
+                }
+                await cleanupCurrentStreamAndProcesses(guildId);
+                if (queue.connection) queue.connection.destroy();
+                return;
+            }
+
+            
         } else if ([VoiceConnectionStatus.Signalling, VoiceConnectionStatus.Connecting].includes(queue.connection.state.status)) {
             console.log(`[DEBUG][${guildId}] 음성 채널 연결 중... Ready 상태 대기`);
-            await entersState(queue.connection, VoiceConnectionStatus.Ready, 30_000);
-            console.log(`[DEBUG][${guildId}] ✅ 음성 채널 연결 준비 완료 (대기 후)`);
+            try {
+                await entersState(queue.connection, VoiceConnectionStatus.Ready, 30_000);
+                console.log(`[DEBUG][${guildId}] ✅ 음성 채널 연결 준비 완료 (대기 후)`);
+            } catch(error){
+                console.error(`[DEBUG][${guildId}] ❌ 음성 채널 Ready 대기 타임아웃:`, error.message);
+                queue.isPlaying = false;
+                if (queue.messageChannel) {
+                    queue.messageChannel.send('음성 채널 연결 대기 중 타임아웃이 발생했습니다. 다시 시도해주세요.').catch(console.error);
+                }
+                await cleanupCurrentStreamAndProcesses(guildId);
+                if (queue.connection) queue.connection.destroy();
+                return;
+            }   
         }
 
         // yt-dlp 프로세스 생성
