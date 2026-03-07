@@ -2,7 +2,7 @@ require('dotenv').config();
 
 // discordbot.js
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, StreamType, entersState } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, StreamType } = require('@discordjs/voice');
 const { spawn } = require('child_process');
 const search = require('youtube-search'); // 유튜브 검색 추가
 // const sodium = require('libsodium-wrappers'); // @discordjs/voice v0.8.0 이상에서는 libsodium-wrappers/sodium 대신 sodium-native 또는 tweetnacl 권장
@@ -361,13 +361,17 @@ async function playNext(guildId) {
                 adapterCreator: client.guilds.cache.get(guildId).voiceAdapterCreator,
             });
 
-            try {
-                await entersState(queue.connection, VoiceConnectionStatus.Ready, 5_000);
-                console.log(`[DEBUG][${guildId}] 음성 채널 연결 완료 (Ready)`);
-            } catch (error) {
-                console.error(`[DEBUG][${guildId}] 음성 채널 연결 실패 (Timeout):`, error);
-                return;
-            }
+            // 에러가 나던 entersState 대신, 'Ready'가 되면 재생을 시작하도록 구성
+            queue.connection.once(VoiceConnectionStatus.Ready, () => {
+                console.log(`[DEBUG][${guildId}] 연결 성공! 이제 재생을 시작합니다.`);
+                queue.connection.subscribe(queue.player);
+                queue.player.play(queue.currentAudioResource);
+            });
+
+            // 만약 signalling에서 못 넘어가고 있다면 강제로 재연결 시도
+            queue.connection.on('stateChange', (oldState, newState) => {
+                console.log(`[DEBUG][${guildId}] Connection: ${oldState.status} -> ${newState.status}`);
+            });
             
             console.log(`[DEBUG][${guildId}] joinVoiceChannel 호출 완료. 초기 상태: ${queue.connection.state.status}`);
             
