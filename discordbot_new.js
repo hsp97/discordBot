@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 // discordbot.js
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, StreamType } = require('@discordjs/voice');
 const { spawn } = require('child_process');
 const search = require('youtube-search'); // 유튜브 검색 추가
@@ -109,7 +109,7 @@ client.on('messageCreate', async message => {
         }
 
         const permissions = queue.voiceChannel.permissionsFor(message.client.user);
-        if (!permissions.has(PermissionFlagsBits.Connect) || !permissions.has(PermissionFlagsBits.Speak)){
+        if (!permissions.has('CONNECT') || !permissions.has('SPEAK')) {
             return message.reply('음성 채널에 연결하거나 말할 권한이 없습니다.');
         }
 
@@ -125,13 +125,6 @@ client.on('messageCreate', async message => {
             };
             queue.playList.push(song);
             message.reply(`"${song.title}"이(가) 재생 목록에 추가되었습니다.`);
-
-            if (!queue.isPlaying) {
-                await playNext(message.guild.id);
-            } else if (queue.embedMessage && (queue.playList.length % 5 === 0 || queue.playList.length === 1)) {
-                 // await sendOrUpdateEmbed(message.guild.id);
-            }
-            
         } else {
             // Youtube 사용
             search(query, youtubeSearchOptions, async (err, results) => {
@@ -146,7 +139,7 @@ client.on('messageCreate', async message => {
                 const song = {
                     url: result.link,
                     title: result.title,
-                    thumbnail: result.thumbnails.default.url,
+                    thumbnail: result.thumbnails?.default?.url || '',
                     requestedBy: message.author.tag
                 };
                 queue.playList.push(song);
@@ -159,6 +152,13 @@ client.on('messageCreate', async message => {
                     // await sendOrUpdateEmbed(message.guild.id);
                 }
             });
+            return; // search 콜백에서 처리하므로 여기서 바로 playNext 호출하지 않음
+        }
+
+        if (!queue.isPlaying) {
+            await playNext(message.guild.id);
+        } else if (queue.embedMessage && (queue.playList.length % 5 === 0 || queue.playList.length === 1)) {
+             // await sendOrUpdateEmbed(message.guild.id);
         }
 
     } else if (command === '넘기기') {
@@ -309,9 +309,18 @@ async function playNext(guildId) {
     const queue = guildQueues.get(guildId);
     if (!queue) return;
 
+    // 이전 스트림 및 프로세스 정리 (playNext 시작 전에 호출하는 것이 아니라 Idle 핸들러나 스킵 시에 정리)
+    // await cleanupCurrentStreamAndProcesses(guildId); // 여기가 아니라 Idle에서
+
     if (queue.playList.length === 0) {
         queue.isPlaying = false;
         await sendOrUpdateEmbed(guildId, '재생중인 노래가 없습니다', '', '', `Music Bot (반복재생 ${queue.isRepeating ? 'on' : 'off'})`);
+        // 큐가 비었을 때 자동으로 나갈지 여부 (선택적)
+        // setTimeout(() => { // 약간의 지연 후 퇴장
+        //     if (queue && queue.playList.length === 0 && !queue.isPlaying && queue.connection) {
+        //         leaveChannel(guildId);
+        //     }
+        // }, 300000); // 예: 5분 후
         return;
     }
 
@@ -321,6 +330,7 @@ async function playNext(guildId) {
         } else {
             queue.isPlaying = false;
             await sendOrUpdateEmbed(guildId, '재생 목록 완료', '', '', `Music Bot (반복재생 ${queue.isRepeating ? 'on' : 'off'})`);
+            // 큐가 다 돌았을 때 자동으로 나갈지 여부 (선택적)
             return;
         }
     }
@@ -331,92 +341,56 @@ async function playNext(guildId) {
     console.log(`[DEBUG][${guildId}] 다음 곡 재생 시도: ${song.title} (${song.url})`);
 
     try {
-        // ===== 음성 채널 연결 - 상세 디버깅 추가 =====
-        if (!queue.connection || 
-            queue.connection.state.status === VoiceConnectionStatus.Destroyed || 
-            queue.connection.state.status === VoiceConnectionStatus.Disconnected) {
-            
-            if (!queue.voiceChannel) {
-                console.warn(`[DEBUG][${guildId}] voiceChannel 정보가 없습니다.`);
-                queue.isPlaying = false;
-                if (queue.messageChannel) {
-                    queue.messageChannel.send('음성 채널 정보를 찾을 수 없습니다. 다시 시도해주세요.').catch(console.error);
-                }
-                return;
+        if (!queue.connection || queue.connection.state.status === VoiceConnectionStatus.Destroyed || queue.connection.state.status === VoiceConnectionStatus.Disconnected) {
+            if (!queue.voiceChannel) { // voiceChannel이 없는 경우 (예: 봇 재시작 후)
+                 console.warn(`[DEBUG][${guildId}] voiceChannel 정보가 없습니다. 재생을 중단합니다.`);
+                 queue.isPlaying = false;
+                 return;
             }
-            
-            // 권한 체크 
-            // const permissions = queue.voiceChannel.permissionsFor(client.user);
-            // console.log(`[DEBUG][${guildId}] 봇 권한:`, {
-            //     connect: permissions.has(PermissionFlagsBits.Connect),  
-            //     speak: permissions.has(PermissionFlagsBits.Speak),      
-            //     viewChannel: permissions.has(PermissionFlagsBits.ViewChannel) 
-            // });
-            
-            console.log(`[DEBUG][${guildId}] 음성 채널 연결 시도 - Channel: ${queue.voiceChannel.name} (${queue.voiceChannel.id})`);
-            
             queue.connection = joinVoiceChannel({
                 channelId: queue.voiceChannel.id,
                 guildId: guildId,
                 adapterCreator: client.guilds.cache.get(guildId).voiceAdapterCreator,
             });
-
-            // 에러가 나던 entersState 대신, 'Ready'가 되면 재생을 시작하도록 구성
+        
+            setupConnectionEventHandlers(guildId);
+        
+            // 새 연결 → Ready 이벤트에서만 재생
             queue.connection.once(VoiceConnectionStatus.Ready, () => {
-                console.log(`[DEBUG][${guildId}] 연결 성공! 이제 재생을 시작합니다.`);
+                console.log(`[DEBUG][${guildId}] 연결 성공! 재생 시작`);
                 queue.connection.subscribe(queue.player);
                 queue.player.play(queue.currentAudioResource);
+                sendOrUpdateEmbed(guildId);
             });
-
-            // 만약 signalling에서 못 넘어가고 있다면 강제로 재연결 시도
-            queue.connection.on('stateChange', (oldState, newState) => {
-                console.log(`[DEBUG][${guildId}] Connection: ${oldState.status} -> ${newState.status}`);
-            });
-            
-            console.log(`[DEBUG][${guildId}] joinVoiceChannel 호출 완료. 초기 상태: ${queue.connection.state.status}`);
-            
-            setupConnectionEventHandlers(guildId);
-            
-            // 상태 변화 모니터링 빼버림 (잘 돌아가다가 갑자기 문제 발생 -> discord js 버전 변경 이후 문제 발생)
-            
-            // Ready 대기 빼버림 (잘 돌아가다가 갑자기 문제 발생 -> discord js 버전 변경 이후 문제 발생)
-            console.log(`[DEBUG][${guildId}] 스트리밍 시작`);
-            
-        } 
-
-        console.log(`[DEBUG][${guildId}] 스트리밍 준비 시작...`);
+        } else {
+            queue.connection.subscribe(queue.player);
+            queue.player.play(queue.currentAudioResource);
+            await sendOrUpdateEmbed(guildId);
+        }
 
         // yt-dlp 프로세스 생성
         queue.currentYtDlpProcess = spawn(ytDlpPath, [
             '-f', 'bestaudio[ext=opus]/bestaudio/best', // Opus 우선, 없으면 최상위 오디오
             '--cookies', './cookies.txt', // 추출한 쿠키 파일 경로
-            // '--js-runtimes', 'qjs', // 추가: 자바스크립트 엔진 명시
+            '--js-runtimes', 'qjs', // 추가: 자바스크립트 엔진 명시
+            '-4',                         // IPv4 강제 (AWS 차단 우회)
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '--no-check-certificates', // 인증서 에러 방지 추가
             '--no-playlist',
-            '--no-progress',
-            '--quiet',
-            '--no-warnings',
             song.url,
             '-o', '-'
         ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
         // ffmpeg 프로세스 생성
         queue.currentFfmpegProcess = spawn(ffmpegPath, [
-            // '-i', 'pipe:0',
-            // '-analyzeduration', '0',
-            // '-loglevel', 'error', // 또는 'warning'
-            // '-f', 'opus',     // Opus 직접 출력 (@discordjs/opus 필요)
-            // // '-f', 's16le', // PCM 사용 시 (StreamType.Raw)
-            // '-ar', '48000',
-            // '-ac', '2',
-            // '-b:a', '96k',  // Opus 사용 시 비트레이트 (선택적)
-            // 'pipe:1',
-
             '-i', 'pipe:0',
             '-analyzeduration', '0',
             '-loglevel', 'error',
-            '-f', 's16le',      // opus 대신 s16le(PCM) 사용
+            '-f', 'ogg',        // ← 변경
+            '-c:a', 'libopus',  // ← 추가
             '-ar', '48000',
             '-ac', '2',
+            '-b:a', '96k',
             'pipe:1'
         ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -454,33 +428,42 @@ async function playNext(guildId) {
             // }
         });
 
-        // ===== AudioResource 생성 =====
         queue.currentAudioResource = createAudioResource(queue.currentFfmpegProcess.stdout, {
-            inputType: StreamType.Raw,
+            inputType: StreamType.OggOpus, // ffmpeg에서 '-f opus'로 출력했으므로 (OggOpus 또는 Opus)
+            // inputType: StreamType.Raw, // ffmpeg에서 '-f s16le'로 출력했다면 Raw
             inlineVolume: true
         });
 
         if (!queue.player) {
             console.log(`[DEBUG][${guildId}] 오디오 플레이어 생성`);
             queue.player = createAudioPlayer();
-            setupPlayerEventHandlers(guildId);
+            setupPlayerEventHandlers(guildId); // 플레이어 이벤트 핸들러 설정
         }
 
-        // ===== 재생 시작 =====
-        console.log(`[DEBUG][${guildId}] 재생 시작 - Connection 상태: ${queue.connection.state.status}`);
-        queue.connection.subscribe(queue.player);
-        queue.player.play(queue.currentAudioResource);
-        
-        console.log(`[DEBUG][${guildId}] ✅ 재생 명령 완료`);
+        if (queue.connection.state.status === VoiceConnectionStatus.Ready) {
+            queue.connection.subscribe(queue.player);
+            queue.player.play(queue.currentAudioResource);
+        } else {
+            console.warn(`[DEBUG][${guildId}] Connection이 Ready 상태가 아님. Subscribe 및 Play 지연.`);
+            // 연결이 준비될 때까지 기다렸다가 실행하거나, 오류 처리
+            try {
+                await waitForConnectionStatus(queue.connection, VoiceConnectionStatus.Ready, 10_000); // 짧은 시간 내 Ready 안되면 문제
+                queue.connection.subscribe(queue.player);
+                queue.player.play(queue.currentAudioResource);
+            } catch (err) {
+                console.error(`[DEBUG][${guildId}] Connection Ready 대기 실패 후 재생 시도:`, err);
+                await cleanupCurrentStreamAndProcesses(guildId);
+                queue.isPlaying = false;
+                return; // 재생 실패
+            }
+        }
         await sendOrUpdateEmbed(guildId);
 
     } catch (error) {
-        console.error(`[DEBUG][${guildId}] 💥 playNext 오류:`, error.message);
-        console.error(`[DEBUG][${guildId}] 오류 스택:`, error.stack);
-        
+        console.error(`[DEBUG][${guildId}] 💥 playNext 함수 전체에서 오류 발생:`, error);
         queue.isPlaying = false;
         if (queue.messageChannel) {
-            queue.messageChannel.send(`노래 재생 중 오류: ${error.message}`).catch(console.error);
+            queue.messageChannel.send(`노래 재생 중 심각한 오류가 발생했습니다: ${error.message}`).catch(console.error);
         }
         await cleanupCurrentStreamAndProcesses(guildId);
     }
@@ -500,12 +483,19 @@ function setupConnectionEventHandlers(guildId) {
     });
     
     queue.connection.on(VoiceConnectionStatus.Disconnected, async () => {
-        console.warn(`[DEBUG][${guildId}] 연결 끊어짐`);
-        setTimeout(() => {
-            if (queue.connection && queue.connection.state.status !== VoiceConnectionStatus.Destroyed) {
-                queue.connection.destroy();
+        console.warn(`[DEBUG][${guildId}] 음성 연결 끊어짐. 재연결 시도...`);
+        try {
+            await Promise.race([
+                waitForConnectionStatus(queue.connection, VoiceConnectionStatus.Signalling, 5_000),
+                waitForConnectionStatus(queue.connection, VoiceConnectionStatus.Connecting, 5_000),
+            ]);
+        } catch (error) {
+            console.error(`[DEBUG][${guildId}] 음성 연결 재연결 실패. 채널 나감.`, error);
+            if (queue.connection.state.status !== VoiceConnectionStatus.Destroyed) {
+                // leaveChannel(guildId); // 여기서 바로 나가면 재시도 로직과 충돌 가능성
+                queue.connection.destroy(); // 명시적으로 연결 파괴
             }
-        }, 5000);
+        }
     });
 
     queue.connection.on(VoiceConnectionStatus.Destroyed, () => {
@@ -530,10 +520,7 @@ function setupPlayerEventHandlers(guildId) {
         await cleanupCurrentStreamAndProcesses(guildId); // 현재 스트림/프로세스 정리 *중요*
 
         if (queue.currentIndex < queue.playList.length -1 || queue.isRepeating) {
-            queue.currentIndex++;
-            if (queue.currentIndex >= queue.playList.length && queue.isRepeating) {
-                queue.currentIndex = 0;
-            }
+            queue.currentIndex++; // 다음 곡 인덱스로 (또는 반복 시 0으로)
             await playNext(guildId);
         } else {
             queue.currentIndex++;
@@ -660,19 +647,18 @@ async function sendOrUpdateEmbed(guildId, titleOverride = null, descOverride = n
         );
 
     try {
-        if (queue.embedMessage && !queue.embedMessage.deleted) {
+        if (queue.embedMessage) {
             await queue.embedMessage.edit({ embeds: [embed], components: [row] });
         } else {
-            const sentMessage = await queue.messageChannel.send({ embeds: [embed], components: [row] });
-            queue.embedMessage = sentMessage;
+            throw { code: 10008 };
         }
     } catch (error) {
-        console.error(`[DEBUG][${guildId}] Embed 메시지 전송/수정 오류:`, error);
-        if (error.code === 10008 && queue.embedMessage) { // Unknown Message
-            console.log(`[DEBUG][${guildId}] 이전 Embed 메시지를 찾을 수 없어 새로 전송합니다.`);
-            queue.embedMessage = null; // 참조 초기화
+        if (error.code === 10008 || !queue.embedMessage) {
+            queue.embedMessage = null;
             const sentMessage = await queue.messageChannel.send({ embeds: [embed], components: [row] }).catch(console.error);
             queue.embedMessage = sentMessage;
+        } else {
+            console.error(`[DEBUG][${guildId}] Embed 메시지 오류:`, error);
         }
     }
 }
@@ -690,7 +676,8 @@ async function leaveChannel(guildId) {
     await cleanupCurrentStreamAndProcesses(guildId); // 스트림/프로세스 정리
 
     if (queue.player) {
-        queue.player.stop(true); // 플레이어 완전 중지
+        queue.player.removeAllListeners(); //Idle 이벤트 차단
+        queue.player.stop(true);
         // player의 이벤트 리스너도 제거하는 것이 좋으나, player 객체 자체를 null로 만들면 GC 대상이 됨
     }
     if (queue.connection) {
@@ -699,17 +686,19 @@ async function leaveChannel(guildId) {
         }
     }
 
-    if (queue.embedMessage && !queue.embedMessage.deleted) {
-        try {
-            // Embed 메시지를 "봇이 채널을 나갔습니다" 등으로 업데이트하거나 삭제
-            const finalEmbed = new EmbedBuilder()
-                .setColor('#ff0000')
-                .setTitle('연결 종료됨')
-                .setDescription('봇이 음성 채널을 나갔습니다.')
-                .setFooter({ text: 'Music Bot' });
-            await queue.embedMessage.edit({ embeds: [finalEmbed], components: [] }); // 버튼 비활성화/제거
-        } catch (e) {
-            console.warn(`[DEBUG][${guildId}] leaveChannel 중 embedMessage 수정 오류:`, e.message);
+    try {
+        if (queue.embedMessage) {
+            await queue.embedMessage.edit({ embeds: [embed], components: [row] });
+        } else {
+            throw { code: 10008 }; // 새 메시지 전송 경로로 이동
+        }
+    } catch (error) {
+        if (error.code === 10008 || !queue.embedMessage) {
+            queue.embedMessage = null;
+            const sentMessage = await queue.messageChannel.send({ embeds: [embed], components: [row] }).catch(console.error);
+            queue.embedMessage = sentMessage;
+        } else {
+            console.error(`[DEBUG][${guildId}] Embed 메시지 오류:`, error);
         }
     }
     // 큐 자체를 삭제하거나, 내부 상태만 초기화
@@ -738,5 +727,39 @@ function cleanupGuildQueue(guildId, deleteQueue = false) {
     }
 }
 
+/**
+ * VoiceConnection이 특정 상태가 될 때까지 대기 (waitForConnectionStatus 대체)
+ * @param {VoiceConnection} connection 
+ * @param {VoiceConnectionStatus} targetStatus 
+ * @param {number} timeout ms
+ * @returns {Promise<void>}
+ */
+function waitForConnectionStatus(connection, targetStatus, timeout = 30_000) {
+    return new Promise((resolve, reject) => {
+        // 이미 목표 상태면 즉시 resolve
+        if (connection.state.status === targetStatus) {
+            return resolve();
+        }
+
+        const timer = setTimeout(() => {
+            connection.removeListener('stateChange', onStateChange);
+            reject(new Error(`Connection did not reach ${targetStatus} within ${timeout}ms`));
+        }, timeout);
+
+        function onStateChange(oldState, newState) {
+            if (newState.status === targetStatus) {
+                clearTimeout(timer);
+                connection.removeListener('stateChange', onStateChange);
+                resolve();
+            } else if (newState.status === VoiceConnectionStatus.Destroyed) {
+                clearTimeout(timer);
+                connection.removeListener('stateChange', onStateChange);
+                reject(new Error('Connection was destroyed while waiting'));
+            }
+        }
+
+        connection.on('stateChange', onStateChange);
+    });
+}
 
 client.login(token);
