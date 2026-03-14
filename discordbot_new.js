@@ -12,6 +12,7 @@ const token = process.env.DISCORD_TOKEN;
 const youtubeApiKey = process.env.YOUTUBE_API_KEY;
 const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
 const ytDlpPath = process.env.YT_DLP_PATH || 'yt-dlp';
+const cookiesPath = process.env.COOKIES_PATH || './cookies.txt';
 
 // 경로 설정: 설정 파일 > 환경 변수 > 기본값 순으로 우선순위
 // const ytDlpPath = process.env.YT_DLP_PATH || configYtDlpPath || 'yt-dlp'; // 시스템 PATH에 yt-dlp가 설정되어 있다면 'yt-dlp'로 사용 가능
@@ -361,36 +362,16 @@ async function playNext(guildId) {
                 adapterCreator: client.guilds.cache.get(guildId).voiceAdapterCreator,
             });
 
-            // 에러가 나던 entersState 대신, 'Ready'가 되면 재생을 시작하도록 구성
-            queue.connection.once(VoiceConnectionStatus.Ready, () => {
-                console.log(`[DEBUG][${guildId}] 연결 성공! 이제 재생을 시작합니다.`);
-                queue.connection.subscribe(queue.player);
-                queue.player.play(queue.currentAudioResource);
-            });
-
-            // 만약 signalling에서 못 넘어가고 있다면 강제로 재연결 시도
-            queue.connection.on('stateChange', (oldState, newState) => {
-                console.log(`[DEBUG][${guildId}] Connection: ${oldState.status} -> ${newState.status}`);
-            });
-            
             console.log(`[DEBUG][${guildId}] joinVoiceChannel 호출 완료. 초기 상태: ${queue.connection.state.status}`);
-            
             setupConnectionEventHandlers(guildId);
-            
-            // 상태 변화 모니터링 빼버림 (잘 돌아가다가 갑자기 문제 발생 -> discord js 버전 변경 이후 문제 발생)
-            
-            // Ready 대기 빼버림 (잘 돌아가다가 갑자기 문제 발생 -> discord js 버전 변경 이후 문제 발생)
-            console.log(`[DEBUG][${guildId}] 스트리밍 시작`);
-            
-        } 
+        }
 
         console.log(`[DEBUG][${guildId}] 스트리밍 준비 시작...`);
 
         // yt-dlp 프로세스 생성
         queue.currentYtDlpProcess = spawn(ytDlpPath, [
-            '-f', 'bestaudio[ext=opus]/bestaudio/best', // Opus 우선, 없으면 최상위 오디오
-            '--cookies', './cookies.txt', // 추출한 쿠키 파일 경로
-            // '--js-runtimes', 'qjs', // 추가: 자바스크립트 엔진 명시
+            '-f', 'bestaudio[ext=opus]/bestaudio/best',
+            '--cookies', cookiesPath,
             '--no-playlist',
             '--no-progress',
             '--quiet',
@@ -468,10 +449,19 @@ async function playNext(guildId) {
 
         // ===== 재생 시작 =====
         console.log(`[DEBUG][${guildId}] 재생 시작 - Connection 상태: ${queue.connection.state.status}`);
-        queue.connection.subscribe(queue.player);
-        queue.player.play(queue.currentAudioResource);
-        
-        console.log(`[DEBUG][${guildId}] ✅ 재생 명령 완료`);
+        if (queue.connection.state.status === VoiceConnectionStatus.Ready) {
+            queue.connection.subscribe(queue.player);
+            queue.player.play(queue.currentAudioResource);
+            console.log(`[DEBUG][${guildId}] ✅ 재생 명령 완료 (즉시)`);
+        } else {
+            // 연결이 아직 준비되지 않은 경우 Ready 이벤트 기다림
+            console.log(`[DEBUG][${guildId}] Connection 준비 대기 중...`);
+            queue.connection.once(VoiceConnectionStatus.Ready, () => {
+                console.log(`[DEBUG][${guildId}] ✅ Connection Ready - 재생 시작`);
+                queue.connection.subscribe(queue.player);
+                queue.player.play(queue.currentAudioResource);
+            });
+        }
         await sendOrUpdateEmbed(guildId);
 
     } catch (error) {
