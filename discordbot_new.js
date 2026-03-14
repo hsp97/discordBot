@@ -372,6 +372,9 @@ async function playNext(guildId) {
         queue.currentYtDlpProcess = spawn(ytDlpPath, [
             '-f', 'bestaudio[ext=opus]/bestaudio/best',
             '--cookies', cookiesPath,
+            '-4',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '--no-check-certificates',
             '--no-playlist',
             '--no-progress',
             '--quiet',
@@ -382,22 +385,14 @@ async function playNext(guildId) {
 
         // ffmpeg 프로세스 생성
         queue.currentFfmpegProcess = spawn(ffmpegPath, [
-            // '-i', 'pipe:0',
-            // '-analyzeduration', '0',
-            // '-loglevel', 'error', // 또는 'warning'
-            // '-f', 'opus',     // Opus 직접 출력 (@discordjs/opus 필요)
-            // // '-f', 's16le', // PCM 사용 시 (StreamType.Raw)
-            // '-ar', '48000',
-            // '-ac', '2',
-            // '-b:a', '96k',  // Opus 사용 시 비트레이트 (선택적)
-            // 'pipe:1',
-
             '-i', 'pipe:0',
             '-analyzeduration', '0',
             '-loglevel', 'error',
-            '-f', 's16le',      // opus 대신 s16le(PCM) 사용
+            '-f', 'ogg',
+            '-c:a', 'libopus',
             '-ar', '48000',
             '-ac', '2',
+            '-b:a', '96k',
             'pipe:1'
         ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -437,7 +432,7 @@ async function playNext(guildId) {
 
         // ===== AudioResource 생성 =====
         queue.currentAudioResource = createAudioResource(queue.currentFfmpegProcess.stdout, {
-            inputType: StreamType.Raw,
+            inputType: StreamType.OggOpus,
             inlineVolume: true
         });
 
